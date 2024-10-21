@@ -66,6 +66,7 @@ class BuildProtoCommand(Command):
       else:
         print('Warning: mfg-inspector output is not fully implemented for '
               'Windows. OpenHTF will be installed without it.')
+        prefix = ''
         self.skip_proto = True
 
     maybe_protoc = os.path.join(prefix, 'bin', 'protoc')
