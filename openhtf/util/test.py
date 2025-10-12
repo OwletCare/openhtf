@@ -126,8 +126,8 @@ List of assertions that can be used with either PhaseRecords or TestRecords:
   assertMeasurementFail(phase_or_test_rec, measurement)
 """
 
-import collections
 from collections.abc import Callable as CollectionsCallable, Iterator
+import contextlib
 import functools
 import inspect
 import logging
@@ -173,6 +173,10 @@ from openhtf.util import logs
 from openhtf.util import text
 
 logs.CLI_LOGGING_VERBOSITY = 2
+
+# TestApi.dut_id attribute when running unit tests with the module-supplied
+# test start function.
+TEST_DUT_ID = 'TestDutId'
 
 
 # Maximum number of measurements per phase to be printed to the assertion
@@ -674,7 +678,7 @@ class TestCase(unittest.TestCase):
     self.last_test_state = None
     # When a test is yielded, this function is provided to as the test_start
     # argument to test.execute.
-    self.test_start_function = lambda: 'TestDutId'
+    self.test_start_function = lambda: TEST_DUT_ID
     # Dictionary mapping plug class (type, not instance) to plug instance.
     # Prior to executing a phase or test, plug instances can be added here.
     # When a OpenHTF phase or test is run in this suite, any instantiated plugs
@@ -786,6 +790,21 @@ class TestCase(unittest.TestCase):
     self.assertTrue(
         any(details.code == code for details in test_rec.outcome_details),
         'No OutcomeDetails had code %s' % code)
+
+  @contextlib.contextmanager
+  def assertTestHasPhaseRecord(self, test_rec, phase_name):
+    """Yields a PhaseRecord with the given name, else asserts."""
+    all_phase_names = []
+    expected_phase_rec = None
+    for phase_rec in test_rec.phases:
+      all_phase_names.append(phase_rec.name)
+      if phase_rec.name == phase_name:
+        expected_phase_rec = phase_rec
+    self.assertIsNotNone(
+        expected_phase_rec,
+        msg=f'Phase "{phase_name}" not found in test phases: {all_phase_names}',
+    )
+    yield expected_phase_rec
 
   ##### PhaseRecord Assertions #####
 
@@ -907,6 +926,8 @@ class TestCase(unittest.TestCase):
 
   @_assert_phase_or_test_record
   def assertMeasured(self, phase_record, measurement, value=mock.ANY):
+    self.assertIn(measurement, phase_record.measurements,
+                  f'Measurement {measurement} not found')
     self.assertTrue(
         phase_record.measurements[measurement].measured_value.is_value_set,
         'Measurement %s not set' % measurement)
@@ -918,25 +939,45 @@ class TestCase(unittest.TestCase):
            phase_record.measurements[measurement].measured_value.value))
 
   @_assert_phase_or_test_record
-  def assertMeasurementPass(self, phase_record, measurement):
+  def assertMeasuredAlmostEqual(
+      self, phase_record, measurement, value, delta=None
+  ):
     self.assertMeasured(phase_record, measurement)
+    measured_value = phase_record.measurements[measurement].measured_value.value
+    self.assertAlmostEqual(
+        value,
+        measured_value,
+        delta=delta,
+        msg=(
+            f'Measurement {measurement} has wrong value: expected {value}, got'
+            f' {measured_value}, tolerance {delta}'
+        ),
+    )
+
+  @_assert_phase_or_test_record
+  def assertMeasurementPass(self, phase_record, measurement, value=mock.ANY):
+    self.assertMeasured(phase_record, measurement, value)
     self.assertIs(measurements.Outcome.PASS,
                   phase_record.measurements[measurement].outcome)
 
   @_assert_phase_or_test_record
-  def assertMeasurementFail(self, phase_record, measurement):
-    self.assertMeasured(phase_record, measurement)
+  def assertMeasurementFail(self, phase_record, measurement, value=mock.ANY):
+    self.assertMeasured(phase_record, measurement, value)
     self.assertIs(measurements.Outcome.FAIL,
                   phase_record.measurements[measurement].outcome)
 
   @_assert_phase_or_test_record
-  def assertMeasurementMarginal(self, phase_record, measurement):
-    self.assertMeasured(phase_record, measurement)
+  def assertMeasurementMarginal(
+      self, phase_record, measurement, value=mock.ANY
+  ):
+    self.assertMeasured(phase_record, measurement, value)
     self.assertTrue(phase_record.measurements[measurement].marginal)
 
   @_assert_phase_or_test_record
-  def assertMeasurementNotMarginal(self, phase_record, measurement):
-    self.assertMeasured(phase_record, measurement)
+  def assertMeasurementNotMarginal(
+      self, phase_record, measurement, value=mock.ANY
+  ):
+    self.assertMeasured(phase_record, measurement, value)
     self.assertFalse(phase_record.measurements[measurement].marginal)
 
   @_assert_phase_or_test_record
@@ -993,11 +1034,13 @@ class TestCase(unittest.TestCase):
 
 
 def get_flattened_phases(
-    phases_or_phase_groups: Sequence[Union[
-        phase_nodes.PhaseNode, phase_collections.PhaseCollectionNode]]
+    node_collections: Iterable[
+        Union[phase_nodes.PhaseNode, phase_collections.PhaseCollectionNode]
+    ],
 ) -> Sequence[phase_nodes.PhaseNode]:
-  """Flattens a sequence of phase nodes or phase collection nodes into nodes."""
+  """Flattens nested sequences of nodes into phase descriptors."""
   phases = []
+  phases_or_phase_groups = phase_collections.flatten(node_collections)
   for phase_or_phase_group in phases_or_phase_groups:
     if isinstance(phase_or_phase_group, phase_collections.PhaseCollectionNode):
       phases.extend(phase_or_phase_group.all_phases())

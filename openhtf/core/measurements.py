@@ -63,7 +63,6 @@ import copy
 import enum
 import functools
 import logging
-import time
 import typing
 from typing import Any, Callable, Dict, Iterator, List, Optional, Text, Tuple, Union
 
@@ -83,6 +82,12 @@ except ImportError:
   pandas = None
 
 _LOG = logging.getLogger(__name__)
+
+_RESERVED_MEASUREMENT_NAMES = frozenset(['set_measurement_outcome_to_skipped'])
+
+
+class ReservedMeasurementNameError(Exception):
+  """Raised when a measurement name is reserved for internal use."""
 
 
 class InvalidDimensionsError(Exception):
@@ -113,6 +118,9 @@ class Outcome(enum.Enum):
   FAIL = 'FAIL'
   UNSET = 'UNSET'
   PARTIALLY_SET = 'PARTIALLY_SET'
+  # Similar to UNSET but requires intentional setting and does not fail the
+  # phase.
+  SKIPPED = 'SKIPPED'
 
 
 @attr.s(slots=True, frozen=True)
@@ -183,6 +191,11 @@ class Measurement(object):
     conditional_validators: List of _ConditionalValidator instances that are
       called when certain Diagnosis Results are present at the beginning of the
       associated phase.
+    allow_fail: Whether to allow the measurement to fail without failing the
+      phase (and test). This is intended for groups of similar measurements,
+      that are useful for more easily tracking individual conditions, while the
+      overall pass-fail is determined by a different measurement (that
+      presumably aggregates the measurements by some user-defined logic).
     measured_value: An instance of MeasuredValue or DimensionedMeasuredValue
       containing the value(s) of this Measurement that have been set, if any.
     notification_cb: An optional function to be called when the measurement is
@@ -207,6 +220,7 @@ class Measurement(object):
   validators = attr.ib(type=List[Callable[[Any], bool]], factory=list)
   conditional_validators = attr.ib(
       type=List[_ConditionalValidator], factory=list)
+  allow_fail = attr.ib(type=bool, default=False)
 
   # Fields set during runtime.
   # measured_value needs to be initialized in the post init function if and only
@@ -220,6 +234,13 @@ class Measurement(object):
 
   # Runtime cache to speed up conversions.
   _cached = attr.ib(type=Optional[Dict[Text, Any]], default=None)
+
+  def __attrs_pre_init__(self, name: Text, *args: Any, **kwargs: Any) -> None:
+    del(args, kwargs)
+    if name in _RESERVED_MEASUREMENT_NAMES:
+      raise ReservedMeasurementNameError(
+          f'Measurement name {name} is reserved for internal use.'
+      )
 
   def __attrs_post_init__(self) -> None:
     if self._measured_value is None:
@@ -480,6 +501,35 @@ class Measurement(object):
     dataframe = self._measured_value.to_dataframe(columns)
 
     return dataframe
+
+  def from_dataframe(self, dataframe: Any, metric_column: str) -> None:
+    """Convert a pandas DataFrame to a multi-dim measurement.
+
+    Args:
+      dataframe: A pandas DataFrame. Dimensions for this multi-dim measurement
+        need to match columns in the DataFrame (can be multi-index).
+      metric_column: The column name of the metric to be measured.
+
+    Raises:
+      TypeError: If this measurement is not dimensioned.
+      ValueError: If dataframe is missing dimensions.
+    """
+    if not isinstance(self._measured_value, DimensionedMeasuredValue):
+      raise TypeError(
+          'Only a dimensioned measurement can be set from a DataFrame'
+      )
+    dimension_labels = [d.name for d in self.dimensions]
+    dimensioned_df = dataframe.reset_index()
+    try:
+      dimensioned_df.set_index(dimension_labels, inplace=True)
+    except KeyError as e:
+      raise ValueError('DataFrame is missing dimensions') from e
+    if metric_column not in dimensioned_df.columns:
+      raise ValueError(
+          f'DataFrame does not have a column named {metric_column}'
+      )
+    for row_dimensions, row_metrics in dimensioned_df.iterrows():
+      self.measured_value[row_dimensions] = row_metrics[metric_column]
 
 
 @attr.s(slots=True)
@@ -859,6 +909,24 @@ class Collection(object):
 
     # Return the MeasuredValue's value, MeasuredValue will raise if not set.
     return m.measured_value.value
+
+  def set_measurement_outcome_to_skipped(self, name: Text) -> None:
+    """Skips a measurement by setting its outcome from UNSET to SKIPPED.
+
+    This allows the measurement to not have a value set but not fail the
+    test phase containing it.
+
+    Args:
+      name: Name for measurement in test record.
+
+    Raises:
+      ValueError: If the measurement is set.
+    """
+    self._assert_valid_key(name)
+    m = self._measurements[name]
+    if m.measured_value is not None and m.measured_value.is_value_set:
+      raise ValueError(f'Measurement {name} has been set, cannot skip it.')
+    m.outcome = Outcome.SKIPPED
 
 
 # Work around for attrs bug in 20.1.0; after the next release, this can be

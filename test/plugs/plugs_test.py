@@ -14,7 +14,6 @@
 
 import threading
 import time
-import unittest
 
 from openhtf import plugs
 from openhtf.core import base_plugs
@@ -106,6 +105,7 @@ class PlugsTest(test.TestCase):
         'number': 0
     }},
                      self.plug_manager.as_base_types()['plug_states'])
+    assert AdderPlug.LAST_INSTANCE is not None
     self.assertEqual('CREATED', AdderPlug.LAST_INSTANCE.state)
 
   @test.yields_phases
@@ -167,6 +167,7 @@ class PlugsTest(test.TestCase):
 
     def _delay_then_update():
       time.sleep(.5)
+      assert AdderPlug.LAST_INSTANCE is not None
       self.assertEqual(1, AdderPlug.LAST_INSTANCE.increment())
 
     threading.Thread(target=_delay_then_update).start()

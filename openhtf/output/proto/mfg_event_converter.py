@@ -55,6 +55,7 @@ MEASUREMENT_OUTCOME_TO_TEST_RUN_STATUS_NAME = {
     measurements.Outcome.FAIL: 'FAIL',
     measurements.Outcome.UNSET: 'ERROR',
     measurements.Outcome.PARTIALLY_SET: 'ERROR',
+    measurements.Outcome.SKIPPED: 'ERROR',
 }
 TEST_RUN_STATUS_NAME_TO_MEASUREMENT_OUTCOME = {
     'PASS': measurements.Outcome.PASS,
@@ -415,8 +416,19 @@ class PhaseCopier(object):
 
     # Copy failed measurements as failure_codes. This happens early to include
     # unset measurements.
-    if (measurement.outcome != measurements.Outcome.PASS and
-        phase.outcome != htf_test_record.PhaseOutcome.SKIP):
+    measurement_ok = (
+        measurement.outcome
+        in (
+            measurements.Outcome.PASS,
+            measurements.Outcome.SKIPPED,
+        )
+    ) or (
+        measurement.outcome == measurements.Outcome.FAIL
+        and measurement.allow_fail
+    )
+    if (
+        not measurement_ok
+    ) and phase.outcome != htf_test_record.PhaseOutcome.SKIP:
       failure_code = mfg_event.failure_codes.add()
       failure_code.code = name
       failure_code.details = '\n'.join(str(v) for v in measurement.validators)
