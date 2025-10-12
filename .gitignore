@@ -45,3 +45,7 @@ other_modules/
 
 # Tox temporary files
 .tox/
+
+# misc
+.idea
+*.DS_Store
