@@ -22,9 +22,9 @@ import unittest
 from unittest import mock
 
 import openhtf
-
 from openhtf import plugs
 from openhtf.core import base_plugs
+from openhtf.core import measurements
 from openhtf.util import test
 from openhtf.util import validators
 
@@ -75,10 +75,13 @@ def test_phase(
     my_plug,
     shameless_plug: ShamelessPlug,
     do_set_measurements: bool = True,
+    do_skip: bool = False,
 ):
   shameless_plug.plug_away()
   phase_data.logger.error('in phase_data %s', id(phase_data))
   phase_data.logger.error('in measurements %s', id(phase_data.measurements))
+  if do_skip:
+    return openhtf.PhaseResult.SKIP
   if do_set_measurements:
     phase_data.measurements.test_measurement = my_plug.do_stuff('stuff_args')
     phase_data.measurements.othr_measurement = 0xDEAD
@@ -160,9 +163,45 @@ class TestTest(test.TestCase):
     # The test fails because the 'fails' measurement fails.
     self.assertTestFail(test_record)
     self.assertTestOutcomeCode(test_record, 0xBED)
-    self.assertNotMeasured(test_record, 'unset_measurement')
-    self.assertNotMeasured(test_record.phases[-1], 'unset_measurement')
-    self.assertMeasured(test_record, 'test_measurement', _DO_STUFF_RETVAL)
+    with self.assertTestHasPhaseRecord(test_record, 'test_phase') as phase_rec:
+      with self.subTest('assertNotMeasured unspecified outcome'):
+        self.assertNotMeasured(test_record, 'unset_measurement')
+        self.assertNotMeasured(phase_rec, 'unset_measurement')
+      with self.subTest('assertNotMeasured with outcome UNSET'):
+        self.assertNotMeasured(
+            test_record,
+            'unset_measurement',
+            outcome=measurements.Outcome.UNSET,
+        )
+        self.assertNotMeasured(
+            phase_rec,
+            'unset_measurement',
+            outcome=measurements.Outcome.UNSET,
+        )
+      with self.subTest('assertNotMeasured with outcome SKIPPED raises'):
+        with self.assertRaises(AssertionError):
+          self.assertNotMeasured(
+              test_record,
+              'unset_measurement',
+              outcome=measurements.Outcome.SKIPPED,
+          )
+        with self.assertRaises(AssertionError):
+          self.assertNotMeasured(
+              phase_rec,
+              'unset_measurement',
+              outcome=measurements.Outcome.SKIPPED,
+          )
+    with self.subTest('assertMeasured no value'):
+      self.assertMeasured(test_record, 'test_measurement')
+    with self.subTest('assertMeasured with value'):
+      self.assertMeasured(test_record, 'test_measurement', _DO_STUFF_RETVAL)
+    with self.subTest('assertMeasured with value and outcome'):
+      self.assertMeasured(
+          test_record,
+          'test_measurement',
+          _DO_STUFF_RETVAL,
+          measurements.Outcome.PASS,
+      )
     self.assertMeasured(test_record, 'othr_measurement', 0xDEAD)
     with self.subTest(name='assert_measurement_pass_without_value'):
       self.assertMeasurementPass(test_record, 'passes')
@@ -174,9 +213,26 @@ class TestTest(test.TestCase):
       self.assertMeasurementFail(test_record, 'fails', 20)
     with self.subTest(name='assert_measurement_almost_equal'):
       self.assertMeasuredAlmostEqual(test_record, 'numeric_measurement', 10.0)
+    with self.subTest(name='assert_measurement_almost_equal_with_outcome'):
+      self.assertMeasuredAlmostEqual(
+          test_record,
+          'numeric_measurement',
+          10.0,
+          measurements.Outcome.PASS,
+      )
     with self.subTest(name='assert_measurement_almost_equal_with_delta'):
       self.assertMeasuredAlmostEqual(
           test_record, 'numeric_measurement', 9.5, delta=1.0
+      )
+    with self.subTest(
+        name='assert_measurement_almost_equal_with_delta_and_outcome'
+    ):
+      self.assertMeasuredAlmostEqual(
+          test_record,
+          'numeric_measurement',
+          9.5,
+          delta=1.0,
+          outcome=measurements.Outcome.PASS,
       )
 
   def test_execute_phase_or_test_test_with_patched_plugs(self):
@@ -237,7 +293,61 @@ class TestTest(test.TestCase):
     phase_record = self.execute_phase_or_test(
         test_phase.with_args(do_set_measurements=False)
     )
-    self.assertNotMeasured(phase_record, 'unset_measurement')
+    with self.subTest('unspecified_outcome'):
+      self.assertNotMeasured(phase_record, 'unset_measurement')
+    with self.subTest('explicit_unset_outcome'):
+      self.assertNotMeasured(
+          phase_record, 'unset_measurement', outcome=measurements.Outcome.UNSET
+      )
+    with self.subTest('mismatched_skipped_outcome'):
+      with self.assertRaises(AssertionError):
+        self.assertNotMeasured(
+            phase_record,
+            'unset_measurement',
+            outcome=measurements.Outcome.SKIPPED,
+        )
+
+  def test_assert_not_measured_when_phase_skipped(self):
+    self.auto_mock_plugs(MyPlug)
+    phase_record = self.execute_phase_or_test(
+        test_phase.with_args(do_skip=True)
+    )
+    self.assertPhaseSkip(phase_record)
+    with self.subTest('unspecified_outcome'):
+      self.assertNotMeasured(phase_record, 'unset_measurement')
+      self.assertNotMeasured(phase_record, 'test_measurement')
+    with self.subTest('explicit_skipped_outcome'):
+      self.assertNotMeasured(
+          phase_record,
+          'unset_measurement',
+          outcome=measurements.Outcome.SKIPPED,
+      )
+      self.assertNotMeasured(
+          phase_record,
+          'test_measurement',
+          outcome=measurements.Outcome.SKIPPED,
+      )
+    with self.subTest('mismatched_unset_outcome'):
+      with self.assertRaises(AssertionError):
+        self.assertNotMeasured(
+            phase_record,
+            'unset_measurement',
+            outcome=measurements.Outcome.UNSET,
+        )
+      with self.assertRaises(AssertionError):
+        self.assertNotMeasured(
+            phase_record,
+            'test_measurement',
+            outcome=measurements.Outcome.UNSET,
+        )
+    self.assertIs(
+        measurements.Outcome.SKIPPED,
+        phase_record.measurements['unset_measurement'].outcome,
+    )
+    self.assertIs(
+        measurements.Outcome.SKIPPED,
+        phase_record.measurements['test_measurement'].outcome,
+    )
 
   @test.yields_phases
   def test_assert_measured_raises_when_measurement_not_defined(self):
@@ -459,7 +569,7 @@ class GetFlattenedPhasesTest(unittest.TestCase):
         ],
     ]
     node_names = []
-    for node in test.get_flattened_phases(nested_nodes):
+    for node in test.get_flattened_phases(nested_nodes):  # pyrefly: ignore[bad-argument-type]
       node_names.append(node.name)
     self.assertEqual(
         node_names,

@@ -37,6 +37,7 @@ from openhtf.core import test_record as htf_test_record
 from openhtf.output.proto import mfg_event_pb2
 from openhtf.output.proto import test_runs_converter
 from openhtf.output.proto import test_runs_pb2
+from openhtf.output.proto import test_runs_pb2
 from openhtf.util import data as htf_data
 from openhtf.util import units
 from openhtf.util import validators
@@ -55,13 +56,14 @@ MEASUREMENT_OUTCOME_TO_TEST_RUN_STATUS_NAME = {
     measurements.Outcome.FAIL: 'FAIL',
     measurements.Outcome.UNSET: 'ERROR',
     measurements.Outcome.PARTIALLY_SET: 'ERROR',
-    measurements.Outcome.SKIPPED: 'ERROR',
+    measurements.Outcome.SKIPPED: 'SKIPPED',
 }
 TEST_RUN_STATUS_NAME_TO_MEASUREMENT_OUTCOME = {
     'PASS': measurements.Outcome.PASS,
     'MARGINAL_PASS': measurements.Outcome.PASS,
     'FAIL': measurements.Outcome.FAIL,
-    'ERROR': measurements.Outcome.UNSET
+    'ERROR': measurements.Outcome.UNSET,
+    'SKIPPED': measurements.Outcome.SKIPPED,
 }
 
 _GIBI_BYTE_TO_BASE = 1 << 30
@@ -161,9 +163,9 @@ def _populate_basic_data(mfg_event: mfg_event_pb2.MfgEvent,
   #   * Handle arbitrary units as uom_code/uom_suffix.
 
   # Populate non-repeated fields.
-  mfg_event.dut_serial = record.dut_id
+  mfg_event.dut_serial = record.dut_id  # pyrefly: ignore[bad-assignment]
   mfg_event.start_time_ms = record.start_time_millis
-  mfg_event.end_time_ms = record.end_time_millis
+  mfg_event.end_time_ms = record.end_time_millis  # pyrefly: ignore[bad-assignment]
   mfg_event.tester_name = record.station_id
   mfg_event.test_name = record.metadata.get('test_name') or record.station_id
   mfg_event.operator_name = record.metadata.get('operator_name', '')
@@ -171,7 +173,7 @@ def _populate_basic_data(mfg_event: mfg_event_pb2.MfgEvent,
   mfg_event.test_description = record.metadata.get('test_description', '')
   mfg_event.test_status = (
       test_runs_pb2.MARGINAL_PASS
-      if record.marginal else test_runs_converter.OUTCOME_MAP[record.outcome])
+      if record.marginal else test_runs_converter.OUTCOME_MAP[record.outcome])  # pyrefly: ignore[bad-index]
 
   # Populate part_tags.
   mfg_event.part_tags.extend(record.metadata.get('part_tags', []))
@@ -182,12 +184,12 @@ def _populate_basic_data(mfg_event: mfg_event_pb2.MfgEvent,
     mfg_phase.name = phase.name
     mfg_phase.description = phase.codeinfo.sourcecode
     mfg_phase.timing.start_time_millis = phase.start_time_millis
-    mfg_phase.timing.end_time_millis = phase.end_time_millis
+    mfg_phase.timing.end_time_millis = phase.end_time_millis  # pyrefly: ignore[bad-assignment]
 
   # Populate failure codes.
   for details in record.outcome_details:
     failure_code = mfg_event.failure_codes.add()
-    failure_code.code = details.code
+    failure_code.code = details.code  # pyrefly: ignore[bad-assignment]
     failure_code.details = details.description
 
   # Populate test logs.
@@ -409,10 +411,15 @@ class PhaseCopier(object):
     if measurement.docstring:
       mfg_measurement.description = measurement.docstring
     mfg_measurement.parameter_tag.append(phase.name)
-    if (measurement.units and
-        measurement.units.code in test_runs_converter.UOM_CODE_MAP):
-      mfg_measurement.unit_code = (
-          test_runs_converter.UOM_CODE_MAP[measurement.units.code])
+    if measurement.units:
+      unit_code = test_runs_converter.UOM_CODE_MAP.get(measurement.units.code)
+      if unit_code:
+        mfg_measurement.unit_code = unit_code
+      else:
+        if measurement.units.code:
+          mfg_measurement.custom_unit_code = measurement.units.code
+        if measurement.units.suffix:
+          mfg_measurement.custom_unit_suffix = measurement.units.suffix
 
     # Copy failed measurements as failure_codes. This happens early to include
     # unset measurements.
@@ -443,7 +450,7 @@ class PhaseCopier(object):
     value = measured_value.value
 
     if isinstance(value, numbers.Number):
-      mfg_measurement.numeric_value = float(value)
+      mfg_measurement.numeric_value = float(value)  # pyrefly: ignore[bad-argument-type]
     elif isinstance(value, bytes):
       mfg_measurement.text_value = value.decode(errors='replace')
     else:
@@ -489,9 +496,9 @@ class PhaseCopier(object):
       for name, attachment in sorted(phase.attachments.items()):
         size = attachment.size
         attachment_cache_key = AttachmentCacheKey(name, size)
-        if attachment_cache_key in self._attachment_cache:
+        if attachment_cache_key in self._attachment_cache:  # pyrefly: ignore[not-iterable]
           mfg_event.attachment.append(
-              self._attachment_cache[attachment_cache_key])
+              self._attachment_cache[attachment_cache_key])  # pyrefly: ignore[unsupported-operation]
         else:
           at_least_one_attachment_for_partial_uploads = (
               self._using_partial_uploads and value_copied_attachment_sizes)
@@ -579,7 +586,7 @@ def attachment_to_multidim_measurement(attachment, name=None):
     # Try to convert into htf.Dimension including backwards compatibility.
     unit = UNITS_BY_CODE.get(d.get('uom_code'), units.NONE)
     description = d.get('name', '')
-    dims.append(measurements.Dimension(description=description, unit=unit))
+    dims.append(measurements.Dimension(description=description, unit=unit))  # pyrefly: ignore[unexpected-keyword]
 
   # Attempt to determine if units are included.
   if attachment_values and len(dims) == len(attachment_values[0]):
@@ -601,8 +608,8 @@ def attachment_to_multidim_measurement(attachment, name=None):
   measurement = measurements.Measurement(
       name=name,
       units=units_,
-      dimensions=tuple(dimensions),
-      measured_value=measured_value,
+      dimensions=tuple(dimensions),  # pyrefly: ignore[unexpected-keyword]
+      measured_value=measured_value,  # pyrefly: ignore[unexpected-keyword]
       outcome=outcome,
       marginal=marginal)
   return measurement

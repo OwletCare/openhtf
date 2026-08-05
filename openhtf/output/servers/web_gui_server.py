@@ -32,12 +32,13 @@ STATIC_FILES_ROOT = os.path.join(WEB_GUI, 'dist')
 INDEX_TEMPLATE = 'index.html'
 
 STATIC_FILES = (
-    r'css/.*\.css',
-    r'css/.*\.css.map',
-    r'img/.*',
-    r'js/.*\.js',
-    r'js/.*\.js\.map',
-    r'service-worker\.js',
+    r'.*\.js',
+    r'.*\.js\.map',
+    r'.*\.css',
+    r'.*\.css\.map',
+    r'3rdpartylicenses\.txt',
+    r'favicon\.ico',
+    r'assets/.*',
 )
 STATIC_FILE_ROUTES = '/(%s)' % '|'.join(STATIC_FILES)
 
@@ -65,7 +66,7 @@ class CorsRequestHandler(tornado.web.RequestHandler):
     self.set_header('Access-Control-Allow-Origin', '*')
     self.set_header('Access-Control-Allow-Headers', 'Content-Type')
 
-  def options(self, **unused_kwargs):
+  def options(self, **unused_kwargs):  # pyrefly: ignore[bad-override]
     self.set_status(204)
     self.finish()
 
@@ -86,7 +87,7 @@ class IndexHandler(tornado.web.RequestHandler):
   def with_config(cls, config):
     return type(cls.__name__, (cls,), {'config': config})
 
-  def get(self):
+  def get(self):  # pyrefly: ignore[bad-override]
     assert self.config is not None
     self.render(INDEX_TEMPLATE, config=self.config)
 
@@ -95,9 +96,14 @@ class StaticFileHandler(tornado.web.StaticFileHandler):
 
   @classmethod
   def get_absolute_path(cls, root, path):
-    return os.path.join(root, path)
+    return os.path.abspath(os.path.join(root, path))
 
   def validate_absolute_path(self, root, abspath):
+    root = os.path.abspath(root)
+    if not abspath.startswith(root + os.sep) and abspath != root:
+      raise tornado.web.HTTPError(403)
+    if not os.path.isfile(abspath):
+      raise tornado.web.HTTPError(404)
     return abspath
 
 

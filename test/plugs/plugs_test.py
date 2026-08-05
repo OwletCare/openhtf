@@ -68,6 +68,15 @@ class TearDownRaisesPlug2(base_plugs.BasePlug):
     raise Exception()
 
 
+def noop_phase():
+  """No-op phase for unit testing."""
+
+
+def noop_adder_plug_phase(adder_plug):
+  """No-op phase that accepts an "adder_plug"."""
+  del adder_plug  # Unused.
+
+
 class PlugsTest(test.TestCase):
 
   def setUp(self):
@@ -106,7 +115,7 @@ class PlugsTest(test.TestCase):
     }},
                      self.plug_manager.as_base_types()['plug_states'])
     assert AdderPlug.LAST_INSTANCE is not None
-    self.assertEqual('CREATED', AdderPlug.LAST_INSTANCE.state)
+    self.assertEqual('CREATED', AdderPlug.LAST_INSTANCE.state)  # pyrefly: ignore[missing-attribute]
 
   @test.yields_phases
   def test_multiple_plugs(self):
@@ -144,7 +153,7 @@ class PlugsTest(test.TestCase):
     def dummy_phase(logger):
       logger.action()
       self.assertIs(logger.logger_seen_init, logger.logger_seen_action)
-      self.assertIs(logger.logger_seen_init, self.logger)
+      self.assertIs(logger.logger_seen_init, self.logger)  # pyrefly: ignore[missing-attribute]
 
     yield dummy_phase
 
@@ -163,7 +172,7 @@ class PlugsTest(test.TestCase):
     self.assertEqual({'number': 0}, update)
     # No update since last time, this should time out (return None).
     self.assertIsNone(
-        self.plug_manager.wait_for_plug_update(adder_plug_name, update, .001))
+        self.plug_manager.wait_for_plug_update(adder_plug_name, update, .001))  # pyrefly: ignore[bad-argument-type]
 
     def _delay_then_update():
       time.sleep(.5)
@@ -174,7 +183,7 @@ class PlugsTest(test.TestCase):
     start_time = time.time()
     self.assertEqual({'number': 1},
                      self.plug_manager.wait_for_plug_update(
-                         adder_plug_name, update, 5))
+                         adder_plug_name, update, 5))  # pyrefly: ignore[bad-argument-type]
     self.assertGreater(time.time() - start_time, .2)
 
   def test_invalid_plug(self):
@@ -190,19 +199,16 @@ class PlugsTest(test.TestCase):
       class BadPlugInit(base_plugs.BasePlug):
 
         def __init__(self):
-          self.logger = None
+          self.logger = None  # pyrefly: ignore[bad-assignment]
 
       self.plug_manager.initialize_plugs({BadPlugInit})
     with self.assertRaises(base_plugs.InvalidPlugError):
       self.plug_manager.wait_for_plug_update('invalid', {}, 0)
 
   def test_duplicate_plug(self):
+    phase = plugs.plug(adder_plug=AdderPlug)(noop_adder_plug_phase)
     with self.assertRaises(plugs.DuplicatePlugError):
-
-      @plugs.plug(adder_plug=AdderPlug)
-      @plugs.plug(adder_plug=AdderPlug)
-      def dummy_phase(adder_plug):
-        del adder_plug  # Unused.
+      plugs.plug(adder_plug=AdderPlug)(phase)
 
   def test_uses_base_tear_down(self):
     self.assertTrue(base_plugs.BasePlug().uses_base_tear_down())
@@ -210,3 +216,29 @@ class PlugsTest(test.TestCase):
     self.assertFalse(AdderPlug().uses_base_tear_down())
     self.assertFalse(AdderSubclassPlug().uses_base_tear_down())
     self.assertFalse(TearDownRaisesPlug1().uses_base_tear_down())
+
+  def test_plug_signature_mismatch_raises(self):
+    with self.assertRaisesRegex(
+        plugs.InvalidPlugForPhaseError, 'present in the phase signature'
+    ):
+      plugs.plug(adder_plug=AdderPlug)(noop_phase)
+
+  def test_plug_signature_match_passes(self):
+    phase = plugs.plug(adder_plug=AdderPlug)(noop_adder_plug_phase)
+    self.assertEqual(len(phase.plugs), 1)
+    self.assertIs(phase.plugs[0].cls, AdderPlug)
+
+  def test_plug_signature_mismatch_update_kwargs_false_passes(self):
+    phase = plugs.plug(update_kwargs=False, adder_plug=AdderPlug)(noop_phase)
+    self.assertEqual(len(phase.plugs), 1)
+    self.assertIs(phase.plugs[0].cls, AdderPlug)
+    self.assertFalse(phase.plugs[0].update_kwargs)
+
+  def test_plug_signature_match_varkw_passes(self):
+    def dummy_phase(**kwargs):
+      del kwargs  # Unused.
+
+    # Should not raise because **kwargs is present
+    phase = plugs.plug(adder_plug=AdderPlug)(dummy_phase)
+    self.assertEqual(len(phase.plugs), 1)
+    self.assertIs(phase.plugs[0].cls, AdderPlug)

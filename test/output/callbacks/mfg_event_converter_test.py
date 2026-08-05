@@ -27,6 +27,7 @@ from openhtf.output.proto import assembly_event_pb2
 from openhtf.output.proto import mfg_event_converter
 from openhtf.output.proto import mfg_event_pb2
 from openhtf.output.proto import test_runs_pb2
+from openhtf.output.proto import test_runs_pb2
 from openhtf.util import logs as test_logs
 from openhtf.util import units
 
@@ -231,7 +232,7 @@ class MfgEventConverterTest(unittest.TestCase):
     measurement = measurements.Measurement(
         name=name,
         outcome=measurements.Outcome.PASS,
-        measured_value=measured_value)
+        measured_value=measured_value)  # pyrefly: ignore[unexpected-keyword]
     return measurement
 
   def test_copy_measurements_from_phase(self):
@@ -318,6 +319,34 @@ class MfgEventConverterTest(unittest.TestCase):
                      0)
     self.assertEqual(mock_measurement_within_percent.numeric_marginal_maximum,
                      0)
+
+  def test_copy_measurements_custom_units(self):
+    custom_unit = units.UnitDescriptor('gibibytes per second', None, 'GiB/s')
+    measurement = self._create_and_set_measurement(
+        'custom-units-meas', 10.5
+    ).with_units(custom_unit)
+
+    phase = test_record.PhaseRecord(
+        name='mock-phase-name',
+        descriptor_id=1,
+        codeinfo=self.create_codeinfo(),
+        measurements={
+            'custom-units-meas': measurement,
+        },
+    )
+
+    mfg_event = mfg_event_pb2.MfgEvent()
+    copier = mfg_event_converter.PhaseCopier([phase])
+    copier.copy_measurements(mfg_event)
+
+    self.assertEqual(len(mfg_event.measurement), 1)
+    mfg_measurement = mfg_event.measurement[0]
+    self.assertEqual(mfg_measurement.name, 'custom-units-meas')
+    self.assertEqual(
+        mfg_measurement.unit_code, test_runs_pb2.Units.UnitCode.Value('NONE')
+    )
+    self.assertFalse(mfg_measurement.HasField('custom_unit_code'))
+    self.assertEqual(mfg_measurement.custom_unit_suffix, 'GiB/s')
 
   def test_copy_attachments_from_phase(self):
     first_attachment_name = 'first_attachment_name'
@@ -492,6 +521,76 @@ class MultiDimConversionTest(unittest.TestCase):
         attachment)
 
     self.assert_same_mdim(mdim, reversed_mdim)
+
+  def test_mfg_event_from_test_record_with_skipped_phase(self):
+    """Tests conversion of skipped measurements to MfgEvent SKIPPED status."""
+    record = test_record.TestRecord(
+        dut_id='dut_serial',
+        start_time_millis=1,
+        end_time_millis=1,
+        station_id='localhost',
+        outcome=test_record.Outcome.PASS,
+        marginal=False,
+    )
+
+    m1 = measurements.Measurement('meas-1', outcome=measurements.Outcome.PASS)
+    m1.measured_value.set(10)
+    m2 = measurements.Measurement(
+        'meas-2', outcome=measurements.Outcome.SKIPPED
+    )
+    m3 = measurements.Measurement(
+        'meas-3', outcome=measurements.Outcome.SKIPPED
+    )
+    m4 = measurements.Measurement(
+        'meas-4', outcome=measurements.Outcome.SKIPPED
+    ).with_dimensions('V')
+
+    phase1 = test_record.PhaseRecord(
+        name='phase-1',
+        descriptor_id=1,
+        codeinfo=test_record.CodeInfo.uncaptured(),
+        result=None,
+        outcome=test_record.PhaseOutcome.PASS,
+        marginal=False,
+        measurements={'meas-1': m1, 'meas-2': m2},
+        attachments={},
+        start_time_millis=1,
+        end_time_millis=1,
+    )
+
+    phase2 = test_record.PhaseRecord(
+        name='phase-2',
+        descriptor_id=2,
+        codeinfo=test_record.CodeInfo.uncaptured(),
+        result=None,
+        outcome=test_record.PhaseOutcome.SKIP,
+        marginal=False,
+        measurements={'meas-3': m3, 'meas-4': m4},
+        attachments={},
+        start_time_millis=1,
+        end_time_millis=1,
+    )
+
+    record.phases = [phase1, phase2]
+
+    mfg_event = mfg_event_converter.mfg_event_from_test_record(record)
+
+    expected_statuses = {
+        'meas-1': test_runs_pb2.Status.PASS,
+        'meas-2': test_runs_pb2.Status.SKIPPED,
+        'meas-3': test_runs_pb2.Status.SKIPPED,
+    }
+
+    actual_measurements = {m.name: m for m in mfg_event.measurement}
+    self.assertEqual(len(actual_measurements), len(expected_statuses))
+
+    for name, expected_status in expected_statuses.items():
+      with self.subTest(name=name):
+        self.assertIn(name, actual_measurements)
+        self.assertEqual(actual_measurements[name].status, expected_status)
+
+    attachment_names = [a.name for a in mfg_event.attachment]
+    self.assertIn('multidim_meas-4', attachment_names)
 
   def assert_same_mdim(self, expected, other):
     self.assertEqual(expected.outcome, other.outcome)

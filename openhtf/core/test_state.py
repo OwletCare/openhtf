@@ -76,7 +76,7 @@ class _Infer(enum.Enum):
 
 # Sentinel value indicating that the mimetype should be inferred.
 INFER_MIMETYPE: Literal[_Infer.INFER] = _Infer.INFER
-MimetypeT = Union[None, Literal[INFER_MIMETYPE], Text]
+MimetypeT = Union[None, Literal[INFER_MIMETYPE], Text]  # pyrefly: ignore[not-a-type]
 
 # MultiDim measurement failure code.
 MULTIDIM_FAIL = 'Multidim Measurement Failure'
@@ -197,11 +197,11 @@ class TestState(util.SubscribableStateMixin):
     if not self.running_phase_state:
       raise ValueError('test_api only available when phase is running.')
     if not self._running_test_api:
-      self._running_test_api = openhtf.TestApi(
+      self._running_test_api = openhtf.TestApi(  # pyrefly: ignore[missing-argument]
           measurements=measurements.Collection(
               self.running_phase_state.measurements),
-          running_phase_state=self.running_phase_state,
-          running_test_state=self,
+          running_phase_state=self.running_phase_state,  # pyrefly: ignore[unexpected-keyword]
+          running_test_state=self,  # pyrefly: ignore[unexpected-keyword]
       )
     return self._running_test_api
 
@@ -375,6 +375,7 @@ class TestState(util.SubscribableStateMixin):
       self.test_record.add_outcome_details(code, description)
       if self._outcome_is_failure_exception(phase_execution_outcome):
         self.state_logger.error(
+            # pyrefly: ignore[missing-attribute]
             f'Outcome of {phase_name} will be FAIL since exception was of type'
             f' {phase_execution_outcome.phase_result.exc_type.__name__}'
         )
@@ -389,7 +390,7 @@ class TestState(util.SubscribableStateMixin):
           self.state_logger.critical(
               'Traceback:%s%s%s%s\n in executing %s',
               os.linesep,
-              phase_execution_outcome.phase_result.get_traceback_string(),
+              phase_execution_outcome.phase_result.get_traceback_string(),  # pyrefly: ignore[missing-attribute]
               os.linesep,
               description,
               phase_name,
@@ -503,7 +504,7 @@ class TestState(util.SubscribableStateMixin):
 
     self.state_logger.debug(
         'Finishing test execution normally with outcome %s.',
-        self.test_record.outcome.name,
+        self.test_record.outcome.name,  # pyrefly: ignore[missing-attribute]
     )
 
   def abort(self) -> None:
@@ -541,7 +542,7 @@ class TestState(util.SubscribableStateMixin):
   def _outcome_is_failure_exception(
       self, outcome: phase_executor.PhaseExecutionOutcome) -> bool:
     for failure_exception in self.test_options.failure_exceptions:
-      if isinstance(outcome.phase_result.exc_val, failure_exception):
+      if isinstance(outcome.phase_result.exc_val, failure_exception):  # pyrefly: ignore[missing-attribute]
         return True
     return False
 
@@ -704,7 +705,7 @@ class PhaseState(object):
       self.logger.warning('Unrecognized MIME type: "%s" for attachment "%s"',
                           mimetype, name)
 
-    attach_record = test_record.Attachment(binary_data, mimetype)
+    attach_record = test_record.Attachment(binary_data, mimetype)  # pyrefly: ignore[bad-argument-type]
     self.phase_record.attachments[name] = attach_record
     self._cached['attachments'][name] = attach_record._asdict()
 
@@ -749,16 +750,19 @@ class PhaseState(object):
     Any UNSET measurements will cause the Phase to FAIL unless
     conf.allow_unset_measurements is set True.
     """
+    phase_skipped = self.result and self.result.is_skip
     for measurement in self.measurements.values():
       # Clear notification callbacks for later serialization.
       measurement.set_notification_callback(None)
+      if phase_skipped and measurement.outcome is measurements.Outcome.UNSET:
+        measurement.outcome = measurements.Outcome.SKIPPED
       # Validate multi-dimensional measurements now that we have all values.
       if measurement.outcome is measurements.Outcome.PARTIALLY_SET:
         try:
           measurement.validate()
         except Exception:  # pylint: disable=broad-except
           # Record the exception as the new result.
-          if self.phase_record.result.is_terminal:
+          if self.phase_record.result.is_terminal:  # pyrefly: ignore[missing-attribute]
             self.logger.exception(
                 'Measurement validation raised an exception, but phase result '
                 'is already terminal; logging additional exception here.')
@@ -861,7 +865,7 @@ class PhaseState(object):
       self.test_state.diagnoses_manager.execute_phase_diagnoser(
           diagnoser, self, self.test_state.test_record)
     except Exception:  # pylint: disable=broad-except
-      if self.phase_record.result.is_terminal:
+      if self.phase_record.result.is_terminal:  # pyrefly: ignore[missing-attribute]
         self.logger.exception(
             'Phase Diagnoser %s raised an exception, but phase result is '
             'already terminal; logging additional exception here.',

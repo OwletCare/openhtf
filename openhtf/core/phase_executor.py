@@ -191,7 +191,7 @@ class PhaseExecutorThread(threads.KillableThread):
     """Log exception, while allowing unit testing to override."""
     self._test_state.state_logger.critical(*args)
 
-  def _thread_exception(self, *args) -> bool:
+  def _thread_exception(self, *args) -> bool:  # pyrefly: ignore[bad-override]
     self._phase_execution_outcome = PhaseExecutionOutcome(ExceptionInfo(*args))
     self._log_exception('Phase %s raised an exception', self._phase_desc.name)
     return True  # Never propagate exceptions upward.
@@ -222,7 +222,7 @@ class PhaseExecutorThread(threads.KillableThread):
     return PhaseExecutionOutcome(threads.ThreadTerminationError())
 
   @property
-  def name(self) -> Text:
+  def name(self) -> Text:  # pyrefly: ignore[bad-override]
     return str(self)
 
   def __str__(self) -> Text:
@@ -242,7 +242,7 @@ class PhaseExecutor(object):
     self._stopping = threading.Event()
 
   def _should_repeat(self, phase: phase_descriptor.PhaseDescriptor,
-                     phase_execution_outcome: PhaseExecutionOutcome) -> bool:
+                     phase_execution_outcome: PhaseExecutionOutcome, is_last_repeat: bool) -> bool:
     """Returns whether a phase should be repeated."""
     if phase_execution_outcome.is_timeout and phase.options.repeat_on_timeout:
       return True
@@ -252,7 +252,10 @@ class PhaseExecutor(object):
       return True
     elif phase.options.repeat_on_measurement_fail:
       last_phase_outcome = self.test_state.test_record.phases[-1].outcome
-      return last_phase_outcome == test_record.PhaseOutcome.FAIL
+      last_repeat_failed = last_phase_outcome == test_record.PhaseOutcome.FAIL
+      if last_repeat_failed and not is_last_repeat:
+        self.test_state.test_record.phases[-1].outcome = test_record.PhaseOutcome.SKIP
+      return last_repeat_failed
     return False
 
   def execute_phase(
@@ -285,7 +288,7 @@ class PhaseExecutor(object):
       is_last_repeat = repeat_count >= repeat_limit
       phase_execution_outcome, profile_stats = self._execute_phase_once(
           phase, is_last_repeat, run_with_profiling, subtest_rec)
-      if (self._should_repeat(phase, phase_execution_outcome) and
+      if (self._should_repeat(phase, phase_execution_outcome, is_last_repeat) and
           not is_last_repeat):
         repeat_count += 1
         continue
@@ -346,7 +349,7 @@ class PhaseExecutor(object):
         self._current_phase_thread = phase_thread
 
       phase_state.result = phase_thread.join_or_die()
-      if phase_state.result.is_repeat and is_last_repeat:
+      if phase_state.result.is_repeat and is_last_repeat:  # pyrefly: ignore[missing-attribute]
         self.logger.error('Phase returned REPEAT, exceeding repeat_limit.')
         phase_state.hit_repeat_limit = True
         override_result = PhaseExecutionOutcome(
@@ -357,8 +360,8 @@ class PhaseExecutor(object):
     # or phase diagnoser raised an exception.
     result = override_result or phase_state.result
     self.logger.debug('Phase %s finished with result %r', phase_desc.name,
-                      result.phase_result)
-    return (result,
+                      result.phase_result)  # pyrefly: ignore[missing-attribute]
+    return (result,  # pyrefly: ignore[bad-return]
             phase_thread.get_profile_stats() if run_with_profiling else None)
 
   def skip_phase(self, phase_desc: phase_descriptor.PhaseDescriptor,

@@ -107,7 +107,7 @@ class TestExecutor(threads.KillableThread):
     self._phase_exec = None  # type: Optional[phase_executor.PhaseExecutor]
     self.uid = execution_uid
     self._last_outcome = None  # type: Optional[phase_executor.PhaseExecutionOutcome]
-    self._last_execution_unit: str = None
+    self._last_execution_unit: str = None  # pyrefly: ignore[bad-assignment]
     self._abort = threading.Event()
     self._full_abort = threading.Event()
     self._execution_finished = threading.Event()
@@ -146,8 +146,10 @@ class TestExecutor(threads.KillableThread):
     This function is defined instead of a __del__ function because Python calls
     the __del__ function unreliably.
     """
-    self.wait()
-    self.running_test_state.close()
+    if self.is_alive():
+      self.wait()
+    if self.test_state is not None:
+      self.test_state.close()
 
   def abort(self) -> None:
     """Abort this test."""
@@ -232,8 +234,12 @@ class TestExecutor(threads.KillableThread):
       _LOG.error('Error in TestExecutor: \n%s', stacktrace)
       raise
     finally:
-      self._execute_test_teardown()
-      self._execution_finished.set()
+      try:
+        self._execute_test_teardown()
+      except Exception:  # pylint: disable=broad-except
+        _LOG.exception('Error during test teardown.')
+      finally:
+        self._execution_finished.set()
 
   def _initialize_plugs(
       self,
@@ -248,7 +254,7 @@ class TestExecutor(threads.KillableThread):
     """
     try:
       self.running_test_state.plug_manager.initialize_plugs(
-          plug_types=plug_types
+          plug_types=plug_types  # pyrefly: ignore[bad-argument-type]
       )
       return False
     except Exception:  # pylint: disable=broad-except
@@ -277,7 +283,7 @@ class TestExecutor(threads.KillableThread):
     # Have the phase executor run the start trigger phase. Do partial plug
     # initialization for just the plugs needed by the start trigger phase.
     if self._initialize_plugs(
-        plug_types=[phase_plug.cls for phase_plug in self._test_start.plugs]):
+        plug_types=[phase_plug.cls for phase_plug in self._test_start.plugs]):  # pyrefly: ignore[bad-argument-type]
       return True
 
     outcome, profile_stats = self.phase_executor.execute_phase(
@@ -314,6 +320,8 @@ class TestExecutor(threads.KillableThread):
         self._teardown_phases_lock.release()
 
   def _execute_test_teardown(self) -> None:
+    if self.test_state is None:
+      return
     # Plug teardown does not affect the test outcome.
     self.running_test_state.plug_manager.tear_down_plugs()
 
@@ -493,7 +501,7 @@ class TestExecutor(threads.KillableThread):
         outcome=test_record.SubtestOutcome.PASS)
     yield subtest_rec
     subtest_rec.end_time_millis = util.time_millis()
-    self.test_state.test_record.add_subtest_record(subtest_rec)
+    self.test_state.test_record.add_subtest_record(subtest_rec)  # pyrefly: ignore[missing-attribute]
 
   def _execute_subtest(self, subtest: phase_collections.Subtest,
                        outer_subtest_rec: Optional[test_record.SubtestRecord],
