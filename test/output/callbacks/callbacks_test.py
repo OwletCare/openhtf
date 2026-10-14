@@ -34,9 +34,8 @@ from openhtf.output.callbacks import console_summary
 from openhtf.output.callbacks import json_factory
 from openhtf.output.proto import mfg_event_converter
 from openhtf.output.proto import test_runs_converter
+from openhtf.output.proto import test_runs_pb2
 from openhtf.util import test
-from openhtf.output.proto import test_runs_pb2
-from openhtf.output.proto import test_runs_pb2
 
 
 class TestOutput(test.TestCase):
@@ -246,4 +245,4 @@ class TestConsoleSummary(test.TestCase):
 
     test_instance.execute()
     assert not any('Traceback' in record.message
-                   for record in result_store.result.log_records)  # pyrefly: ignore[missing-attribute]
+                   for record in result_store.result.log_records)

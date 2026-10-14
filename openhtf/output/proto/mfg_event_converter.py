@@ -37,7 +37,6 @@ from openhtf.core import test_record as htf_test_record
 from openhtf.output.proto import mfg_event_pb2
 from openhtf.output.proto import test_runs_converter
 from openhtf.output.proto import test_runs_pb2
-from openhtf.output.proto import test_runs_pb2
 from openhtf.util import data as htf_data
 from openhtf.util import units
 from openhtf.util import validators
@@ -353,7 +352,7 @@ def multidim_measurement_to_attachment(name, measurement):
       'dimensions': dims,
       'value': value,
   })
-  attachment = htf_test_record.Attachment(data, test_runs_pb2.MULTIDIM_JSON)  # pytype: disable=wrong-arg-types  # gen-stub-imports
+  attachment = htf_test_record.Attachment(data, test_runs_pb2.MULTIDIM_JSON)  # pyrefly: ignore[bad-argument-type]
 
   return attachment
 
@@ -527,7 +526,10 @@ class PhaseCopier(object):
     elif mimetype == test_runs_pb2.MULTIDIM_JSON:
       attachment.type = mimetype
     else:
-      attachment.type = test_runs_pb2.BINARY
+      if isinstance(mimetype, str) and mimetype:
+        attachment.mime_type = mimetype
+      else:
+        attachment.type = test_runs_pb2.BINARY
 
 
 def test_record_from_mfg_event(mfg_event):
@@ -586,7 +588,7 @@ def attachment_to_multidim_measurement(attachment, name=None):
     # Try to convert into htf.Dimension including backwards compatibility.
     unit = UNITS_BY_CODE.get(d.get('uom_code'), units.NONE)
     description = d.get('name', '')
-    dims.append(measurements.Dimension(description=description, unit=unit))  # pyrefly: ignore[unexpected-keyword]
+    dims.append(measurements.Dimension(description=description, unit=unit))
 
   # Attempt to determine if units are included.
   if attachment_values and len(dims) == len(attachment_values[0]):
@@ -608,8 +610,8 @@ def attachment_to_multidim_measurement(attachment, name=None):
   measurement = measurements.Measurement(
       name=name,
       units=units_,
-      dimensions=tuple(dimensions),  # pyrefly: ignore[unexpected-keyword]
-      measured_value=measured_value,  # pyrefly: ignore[unexpected-keyword]
-      outcome=outcome,
+      dimensions=tuple(dimensions),
+      measured_value=measured_value,
+      outcome=outcome,  # pyrefly: ignore[bad-argument-type]
       marginal=marginal)
   return measurement

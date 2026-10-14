@@ -27,7 +27,6 @@ from openhtf.output.proto import assembly_event_pb2
 from openhtf.output.proto import mfg_event_converter
 from openhtf.output.proto import mfg_event_pb2
 from openhtf.output.proto import test_runs_pb2
-from openhtf.output.proto import test_runs_pb2
 from openhtf.util import logs as test_logs
 from openhtf.util import units
 
@@ -232,7 +231,7 @@ class MfgEventConverterTest(unittest.TestCase):
     measurement = measurements.Measurement(
         name=name,
         outcome=measurements.Outcome.PASS,
-        measured_value=measured_value)  # pyrefly: ignore[unexpected-keyword]
+        measured_value=measured_value)
     return measurement
 
   def test_copy_measurements_from_phase(self):
@@ -383,6 +382,52 @@ class MfgEventConverterTest(unittest.TestCase):
         tuple(mfg_event.attachment),
         (expected_first_attachment_proto, expected_other_attachment_proto))
 
+  def test_copy_attachments_with_custom_mimetype(self):
+    attachment_name = 'custom_attachment'
+    attachment = test_record.Attachment(b'<html></html>', 'text/html')
+    expected_attachment_proto = mfg_event_pb2.EventAttachment(
+        name=attachment_name,
+        value_binary=attachment.data,
+        mime_type='text/html')
+
+    phase = test_record.PhaseRecord(
+        name='mock-phase-name',
+        descriptor_id=1,
+        codeinfo=self.create_codeinfo(),
+        attachments={attachment_name: attachment},
+    )
+
+    mfg_event = mfg_event_pb2.MfgEvent()
+    copier = mfg_event_converter.PhaseCopier([phase])
+    copier.copy_attachments(mfg_event)
+
+    self.assertCountEqual(
+        tuple(mfg_event.attachment),
+        (expected_attachment_proto,))
+
+  def test_copy_attachments_with_empty_mimetype(self):
+    attachment_name = 'empty_mimetype_attachment'
+    attachment = test_record.Attachment(b'dummy', '')
+    expected_attachment_proto = mfg_event_pb2.EventAttachment(
+        name=attachment_name,
+        value_binary=attachment.data,
+        type=test_runs_pb2.BINARY)
+
+    phase = test_record.PhaseRecord(
+        name='mock-phase-name',
+        descriptor_id=1,
+        codeinfo=self.create_codeinfo(),
+        attachments={attachment_name: attachment},
+    )
+
+    mfg_event = mfg_event_pb2.MfgEvent()
+    copier = mfg_event_converter.PhaseCopier([phase])
+    copier.copy_attachments(mfg_event)
+
+    self.assertCountEqual(
+        tuple(mfg_event.attachment),
+        (expected_attachment_proto,))
+
   def test_copy_attachments_skips_if_too_much_data_and_returns_false(self):
     attachment_names = ('mock-attachment-name0', 'mock-attachment-name1')
 
@@ -479,7 +524,7 @@ class MultiDimConversionTest(unittest.TestCase):
     expected = self.create_multi_dim_measurement()
 
     attachment = test_record.Attachment(TEST_MULTIDIM_JSON,
-                                        test_runs_pb2.MULTIDIM_JSON)  # pytype: disable=wrong-arg-types  # gen-stub-imports
+                                        test_runs_pb2.MULTIDIM_JSON)  # pyrefly: ignore[bad-argument-type]
     measurement = mfg_event_converter.attachment_to_multidim_measurement(
         attachment)
 
@@ -515,7 +560,7 @@ class MultiDimConversionTest(unittest.TestCase):
     data_dict = json.loads(attachment.data)
     data_dict['outcome'] = test_runs_pb2.Status.Value(data_dict['outcome'])
     attachment = test_record.Attachment(
-        json.dumps(data_dict).encode('utf-8'), test_runs_pb2.MULTIDIM_JSON)  # pytype: disable=wrong-arg-types  # gen-stub-imports
+        json.dumps(data_dict).encode('utf-8'), test_runs_pb2.MULTIDIM_JSON)  # pyrefly: ignore[bad-argument-type]
 
     reversed_mdim = mfg_event_converter.attachment_to_multidim_measurement(
         attachment)
